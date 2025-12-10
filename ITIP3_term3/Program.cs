@@ -1,393 +1,385 @@
 ﻿using System;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Linq;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Runtime.InteropServices;
 
-public sealed class FileWrapper : IDisposable
+namespace pj3
 {
-    [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr open(string path, [MarshalAs(UnmanagedType.Bool)] bool read);
-
-    [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void close(IntPtr file);
-
-    [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool read(IntPtr file, int num, StringBuilder word);
-
-    [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void write(IntPtr file, string text);
-
-    [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int length(IntPtr file);
-
-    private IntPtr _fileHandle;
-    private bool _disposed = false;
-    private readonly string _filePath;
-    private readonly bool _readOnly;
-
-    public FileWrapper(string path, bool readOnly)
+    public class FileLibrary : IDisposable
     {
-        if (string.IsNullOrEmpty(path))
-            throw new ArgumentException("File path cannot be empty", nameof(path));
+        [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr open(string path, bool read);
 
-        _filePath = path;
-        _readOnly = readOnly;
+        [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void close(IntPtr file);
 
-        try
+        [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool read(IntPtr file, int num, StringBuilder word);
+
+        [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void write(IntPtr file, string text);
+
+        [DllImport("file32.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int length(IntPtr file);
+
+        protected bool disposed = false;
+        IntPtr file;
+        string path;
+
+        public FileLibrary(string _path, bool mode)
         {
-            _fileHandle = open(path, readOnly);
-            if (_fileHandle == IntPtr.Zero)
-                throw new Exception($"Failed to open file: {path}");
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Error opening file {path}: {ex.Message}", ex);
-        }
-    }
-
-    public IntPtr Handle => _fileHandle;
-
-    public int WordCount
-    {
-        get
-        {
-            CheckDisposed();
+            path = _path;
             try
             {
-                return length(_fileHandle);
+                file = open(path, mode);
             }
-            catch (Exception ex)
+            catch (Exception e)
             {
-                throw new Exception($"Error getting word count: {ex.Message}", ex);
+                Console.WriteLine("Error: {0} Check parameters", e.Message);
             }
         }
-    }
 
-    public string ReadWord(int wordNumber)
-    {
-        CheckDisposed();
-
-        if (wordNumber < 1 || wordNumber > WordCount)
-            throw new ArgumentOutOfRangeException(nameof(wordNumber),
-                $"Word number must be between 1 and {WordCount}");
-
-        try
+        public void Open(string path, bool mode)
         {
-            StringBuilder wordBuilder = new StringBuilder(255);
-            bool success = read(_fileHandle, wordNumber, wordBuilder);
-
-            if (!success)
-                throw new Exception($"Failed to read word #{wordNumber}");
-
-            return wordBuilder.ToString();
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Error reading word #{wordNumber}: {ex.Message}", ex);
-        }
-    }
-
-    public void WriteText(string text)
-    {
-        CheckDisposed();
-
-        if (_readOnly)
-            throw new InvalidOperationException("File is opened in read-only mode");
-
-        try
-        {
-            write(_fileHandle, text);
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Error writing to file: {ex.Message}", ex);
-        }
-    }
-
-    public string[] GetAllWords()
-    {
-        CheckDisposed();
-
-        int count = WordCount;
-        string[] words = new string[count];
-
-        for (int i = 1; i <= count; i++)
-        {
-            words[i - 1] = ReadWord(i);
+            try
+            {
+                file = open(path, mode);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error: {0} Check parameters", e.Message);
+            }
         }
 
-        return words;
-    }
-
-    public void ProcessFile()
-    {
-        CheckDisposed();
-
-        if (_readOnly)
-            throw new InvalidOperationException("File is opened in read-only mode");
-
-        try
+        public int CountWords()
         {
-            string[] allWords = GetAllWords();
+            return length(file);
+        }
 
-            if (allWords.Length == 0)
-                return;
+        public StringBuilder ReadWord(int index)
+        {
+            StringBuilder word = new StringBuilder(255);
+            if (read(file, index, word))
+            {
+                return word;
+            }
+            else
+            {
+                throw new Exception($"Failure read word index {index}");
+            }
+        }
 
-            var wordGroups = allWords
-                .GroupBy(w => w)
-                .Select(g => new
+        // ФУНКЦИЯ 1: Оставить только уникальные слова с указанием количества повторений
+        public void LeaveUniqueWordsWithCount()
+        {
+            // получаем все слова из файла
+            List<string> words = new List<string>();
+            for (int i = 0; i < this.CountWords(); i++)
+            {
+                words.Add(this.ReadWord(i + 1).ToString());
+            }
+
+            close(file);
+
+            // считаем частоту слов и сохраняем порядок уникальных слов
+            Dictionary<string, int> frequency = new Dictionary<string, int>();
+            List<string> uniqueWordsInOrder = new List<string>();
+
+            foreach (string word in words)
+            {
+                if (frequency.ContainsKey(word))
                 {
-                    Word = g.Key,
-                    Count = g.Count()
-                })
-                .ToList();
-
-            var sortedWords = wordGroups
-                .OrderBy(w => w.Word.Length)
-                .ThenBy(w => w.Word)
-                .ToList();
-
-            StringBuilder newContent = new StringBuilder();
-            foreach (var item in sortedWords)
-            {
-                newContent.Append($"{item.Word} {item.Count} ");
+                    frequency[word]++;
+                }
+                else
+                {
+                    frequency[word] = 1;
+                    uniqueWordsInOrder.Add(word); // сохраняем порядок первого появления
+                }
             }
 
-            WriteText(newContent.ToString().Trim());
+            // формируем новый текст: слово(количество_повторений)
+            List<string> resultWords = new List<string>();
+            foreach (string word in uniqueWordsInOrder)
+            {
+                resultWords.Add($"{word}({frequency[word]})");
+            }
+
+            string resultText = string.Join(" ", resultWords);
+
+            this.Open(path, false);
+            write(file, resultText);
+            close(file);
+            this.Open(path, true);
         }
-        catch (Exception ex)
+
+        // ФУНКЦИЯ 2: Отсортировать слова по количеству букв (простая сортировка)
+        public void SortWordsByLength()
         {
-            throw new Exception($"Error processing file: {ex.Message}", ex);
+            // получаем все слова из файла (включая повторения)
+            List<string> words = new List<string>();
+            for (int i = 0; i < this.CountWords(); i++)
+            {
+                words.Add(this.ReadWord(i + 1).ToString());
+            }
+
+            close(file);
+
+            // сортируем слова по длине (от самого короткого к самому длинному)
+            // слова одинаковой длины сохраняются в исходном порядке
+            List<string> sortedWords = words.OrderBy(w => w.Length).ToList();
+
+            string resultText = string.Join(" ", sortedWords);
+
+            this.Open(path, false);
+            write(file, resultText);
+            close(file);
+            this.Open(path, true);
+        }
+
+        // Реализация интерфейса IDisposable
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                if (disposing)
+                {
+                    // очистка управляемых ресурсов
+                }
+
+                // очистка неуправляемых ресурсов
+                if (file != IntPtr.Zero)
+                {
+                    close(file);
+                    file = IntPtr.Zero;
+                }
+
+                disposed = true;
+            }
+        }
+
+        // Финализатор (деструктор)
+        ~FileLibrary()
+        {
+            Dispose(false);
         }
     }
 
-    private void CheckDisposed()
+    class Program
     {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(FileWrapper));
-    }
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    private void Dispose(bool disposing)
-    {
-        if (!_disposed)
+        static int CorrectNumber(int minNum, int maxNum)
         {
-            if (_fileHandle != IntPtr.Zero)
+            int num;
+            do
             {
                 try
                 {
-                    close(_fileHandle);
+                    num = Convert.ToInt32(Console.ReadLine());
+                    if (num > maxNum || num < minNum)
+                        throw new ArgumentOutOfRangeException();
+                    else
+                        break;
                 }
-                catch
+                catch (ArgumentOutOfRangeException)
                 {
-                    // Ignore errors during finalization
+                    Console.WriteLine("Number out of range. Please enter number between {0} and {1}", minNum, maxNum);
+                    Console.Write("Try again: ");
                 }
-                _fileHandle = IntPtr.Zero;
-            }
-            _disposed = true;
-        }
-    }
-
-    ~FileWrapper()
-    {
-        Dispose(false);
-    }
-}
-
-class Program
-{
-    private static FileWrapper currentFile = null;
-    private static bool fileOpened = false;
-
-    static void Main()
-    {
-        while (true)
-        {
-            Console.Clear();
-            Console.WriteLine("=== File Library Testing ===");
-            Console.WriteLine();
-            Console.WriteLine("File status: " + (fileOpened ? "Opened" : "Not opened"));
-            Console.WriteLine();
-            Console.WriteLine("Menu:");
-            Console.WriteLine("1. Open file");
-            Console.WriteLine("2. Get word count");
-            Console.WriteLine("3. Process file (unique words + sorting)");
-            Console.WriteLine("4. View file contents");
-            Console.WriteLine("5. Close file and exit");
-            Console.WriteLine();
-            Console.Write("Select action: ");
-
-            string choice = Console.ReadLine();
-
-            try
-            {
-                switch (choice)
+                catch (Exception)
                 {
-                    case "1":
-                        OpenFile();
-                        break;
-                    case "2":
-                        ShowWordCount();
-                        break;
-                    case "3":
-                        ProcessFile();
-                        break;
-                    case "4":
-                        ShowFileContents();
-                        break;
-                    case "5":
-                        CloseFile();
-                        Console.WriteLine("Program finished.");
-                        return;
-                    default:
-                        Console.WriteLine("Invalid choice. Press Enter to continue...");
-                        Console.ReadLine();
-                        break;
+                    Console.WriteLine("Invalid input. Please enter a valid number.");
+                    Console.Write("Try again: ");
                 }
             }
-            catch (Exception ex)
+            while (true);
+            return num;
+        }
+
+        static void Main(string[] args)
+        {
+            FileLibrary file = null;
+            int menu;
+
+            do
             {
-                Console.WriteLine($"Error: {ex.Message}");
-                Console.WriteLine("Press Enter to continue...");
-                Console.ReadLine();
-            }
-        }
-    }
+                Console.WriteLine("-------- File Operations Menu --------");
+                Console.WriteLine("1) Open file");
+                Console.WriteLine("2) Get word count");
+                Console.WriteLine("3) Leave only unique words with repetition count");
+                Console.WriteLine("4) Sort words by length");
+                Console.WriteLine("0) Exit");
+                Console.Write("Select option: ");
 
-    static void OpenFile()
-    {
-        Console.Write("Enter file path: ");
-        string path = Console.ReadLine();
+                menu = CorrectNumber(0, 4);
 
-        Console.Write("Opening mode (R - read, W - write): ");
-        string mode = Console.ReadLine().ToUpper();
-
-        bool readOnly = mode == "R";
-
-        if (fileOpened)
-        {
-            currentFile.Dispose();
-            fileOpened = false;
-        }
-
-        try
-        {
-            currentFile = new FileWrapper(path, readOnly);
-            fileOpened = true;
-            Console.WriteLine($"File opened successfully.");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error opening file: {ex.Message}");
-            fileOpened = false;
-        }
-
-        Console.WriteLine("Press Enter to continue...");
-        Console.ReadLine();
-    }
-
-    static void ShowWordCount()
-    {
-        if (fileOpened)
-        {
-            try
-            {
-                int count = currentFile.WordCount;
-                Console.WriteLine($"Word count in file: {count}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error getting word count: {ex.Message}");
-            }
-        }
-        else
-        {
-            Console.WriteLine("File is not opened.");
-        }
-
-        Console.WriteLine("Press Enter to continue...");
-        Console.ReadLine();
-    }
-
-    static void ProcessFile()
-    {
-        if (fileOpened)
-        {
-            try
-            {
-                Console.WriteLine($"Processing file...");
-                currentFile.ProcessFile();
-                Console.WriteLine($"File processed successfully.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error processing file: {ex.Message}");
-            }
-        }
-        else
-        {
-            Console.WriteLine("File is not opened.");
-        }
-
-        Console.WriteLine("Press Enter to continue...");
-        Console.ReadLine();
-    }
-
-    static void ShowFileContents()
-    {
-        if (fileOpened)
-        {
-            try
-            {
-                Console.WriteLine($"File contents:");
-                string[] words = currentFile.GetAllWords();
-
-                for (int j = 0; j < words.Length; j++)
+                switch (menu)
                 {
-                    Console.WriteLine($"  {j + 1}. {words[j]}");
+                    case 1: // Open file
+                        {
+                            try
+                            {
+                                Console.Write("Enter file path: ");
+                                string path = Console.ReadLine();
+                                Console.Write("Open for reading (1) or writing (0)? ");
+                                bool readMode = CorrectNumber(0, 1) == 1;
+
+                                file?.Dispose(); // Dispose previous file if exists
+                                file = new FileLibrary(path, readMode);
+                                Console.WriteLine("File opened successfully!");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("Error opening file: {0}", ex.Message);
+                            }
+                            break;
+                        }
+                    case 2: // Get word count
+                        {
+                            if (file == null)
+                            {
+                                Console.WriteLine("Please open a file first!");
+                                break;
+                            }
+                            try
+                            {
+                                int count = file.CountWords();
+                                Console.WriteLine("Word count in file: {0}", count);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("Error getting word count: {0}", ex.Message);
+                            }
+                            break;
+                        }
+                    case 3: // Leave only unique words with repetition count
+                        {
+                            if (file == null)
+                            {
+                                Console.WriteLine("Please open a file first!");
+                                break;
+                            }
+                            try
+                            {
+                                Console.WriteLine("Processing... This will modify the file!");
+                                Console.WriteLine("Original words will be replaced with unique words and their counts.");
+
+                                // Сохраняем исходное состояние для сравнения
+                                int originalCount = file.CountWords();
+                                Console.WriteLine("Original word count: {0}", originalCount);
+
+                                file.LeaveUniqueWordsWithCount();
+                                Console.WriteLine("File updated - only unique words with repetition count remain!");
+
+                                // Показать результат
+                                int newCount = file.CountWords();
+                                Console.WriteLine("New word count: {0}", newCount);
+
+                                if (newCount > 0)
+                                {
+                                    Console.WriteLine("New content (format: word(count)):");
+                                    int showCount = Math.Min(10, newCount);
+                                    for (int i = 1; i <= showCount; i++)
+                                    {
+                                        Console.WriteLine($"  {i}. {file.ReadWord(i)}");
+                                    }
+                                    if (newCount > 10)
+                                    {
+                                        Console.WriteLine($"  ... and {newCount - 10} more");
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("Error processing file: {0}", ex.Message);
+                            }
+                            break;
+                        }
+                    case 4: // Sort words by length
+                        {
+                            if (file == null)
+                            {
+                                Console.WriteLine("Please open a file first!");
+                                break;
+                            }
+                            try
+                            {
+                                Console.WriteLine("Processing... This will modify the file!");
+                                Console.WriteLine("Words will be sorted by length (from shortest to longest).");
+
+                                // Сохраняем исходное состояние для сравнения
+                                int originalCount = file.CountWords();
+                                Console.WriteLine("Original word count: {0}", originalCount);
+
+                                // Показываем несколько исходных слов
+                                if (originalCount > 0)
+                                {
+                                    Console.Write("Original first 5 words: ");
+                                    for (int i = 1; i <= Math.Min(5, originalCount); i++)
+                                    {
+                                        Console.Write(file.ReadWord(i) + " ");
+                                    }
+                                    Console.WriteLine();
+                                }
+
+                                file.SortWordsByLength();
+                                Console.WriteLine("File updated - words sorted by length!");
+
+                                // Показать результат
+                                int newCount = file.CountWords();
+                                Console.WriteLine("New word count: {0}", newCount);
+
+                                if (newCount > 0)
+                                {
+                                    Console.WriteLine("First 10 shortest words:");
+                                    int showCount = Math.Min(10, newCount);
+                                    for (int i = 1; i <= showCount; i++)
+                                    {
+                                        string word = file.ReadWord(i).ToString();
+                                        Console.WriteLine($"  {i}. '{word}' (length: {word.Length})");
+                                    }
+
+                                    if (newCount > 10)
+                                    {
+                                        Console.WriteLine("\nLast 10 longest words:");
+                                        showCount = Math.Min(10, newCount);
+                                        int start = Math.Max(1, newCount - 9);
+                                        for (int i = start; i <= newCount; i++)
+                                        {
+                                            string word = file.ReadWord(i).ToString();
+                                            Console.WriteLine($"  {i}. '{word}' (length: {word.Length})");
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("Error sorting file: {0}", ex.Message);
+                            }
+                            break;
+                        }
+                    case 0: // Exit
+                        {
+                            Console.WriteLine("Exiting program...");
+                            file?.Dispose();
+                            break;
+                        }
                 }
 
-                if (words.Length == 0)
+                if (menu != 0)
                 {
-                    Console.WriteLine("  (file is empty)");
+                    Console.WriteLine("\nPress any key to continue...");
+                    Console.ReadKey();
+                    Console.Clear();
                 }
-                Console.WriteLine();
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error reading file: {ex.Message}");
-            }
-        }
-        else
-        {
-            Console.WriteLine("File is not opened.");
-        }
-
-        Console.WriteLine("Press Enter to continue...");
-        Console.ReadLine();
-    }
-
-    static void CloseFile()
-    {
-        if (fileOpened)
-        {
-            try
-            {
-                currentFile.Dispose();
-                fileOpened = false;
-                Console.WriteLine($"File closed.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error closing file: {ex.Message}");
-            }
+            while (menu != 0);
         }
     }
 }
