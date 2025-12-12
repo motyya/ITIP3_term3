@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Runtime.InteropServices;
 
-namespace pj3
+namespace ITIP3
 {
     public class FileLibrary : IDisposable
     {
